@@ -7,11 +7,22 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from app.agent import Agent
 from app.config import settings
+from groq import RateLimitError
 
 logger = logging.getLogger(__name__)
 
 # Delivery style approved in testing (voice-samples/fixed_hannah_1.wav): two short, plain sentences
 SPOKEN_STYLE = "calm, plain and matter-of-fact, like a knowledgeable friend; exactly two short sentences"
+
+
+def _retry_after_seconds(error: Exception) -> float:
+    """Seconds to wait from Groq's 429 headers (retry-after or x-ratelimit-reset-tokens like '550ms' / '3.2s')."""
+    headers = getattr(getattr(error, "response", None), "headers", {}) or {}
+    value = headers.get("retry-after") or headers.get("x-ratelimit-reset-tokens") or "3"
+    total = 0.0
+    for amount, unit in re.findall(r"([\d.]+)\s*(ms|h|m|s)?", value):
+        total += float(amount) * {"ms": 0.001, "h": 3600, "m": 60, "s": 1, "": 1}[unit]
+    return max(total, 0.5)
 
 
 def _for_tts(text: str) -> str:
@@ -151,16 +162,27 @@ async def speak(request: SpeakRequest):
     if not agent.client:
         raise HTTPException(status_code=503, detail="Voice replies need GROQ_API_KEY in .env")
     spoken = await asyncio.to_thread(_spoken_summary, request.text)
-    try:
-        audio = await asyncio.to_thread(
-            agent.client.audio.speech.create,
-            model=settings.TTS_MODEL,
-            voice=settings.TTS_VOICE,
-            input=_for_tts(spoken),
-            response_format="wav"
-        )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"TTS failed: {e}")
+    # Orpheus on Groq's free tier allows ~1,200 tokens/min, so back-to-back replies can hit 429.
+    # Wait out the short per-minute window (up to ~12s total) rather than dropping to the robotic browser voice.
+    audio = None
+    for attempt in range(4):
+        try:
+            audio = await asyncio.to_thread(
+                agent.client.with_options(max_retries=0).audio.speech.create,
+                model=settings.TTS_MODEL,
+                voice=settings.TTS_VOICE,
+                input=_for_tts(spoken),
+                response_format="wav"
+            )
+            break
+        except RateLimitError as e:
+            retry_after = _retry_after_seconds(e)
+            if attempt == 3 or retry_after > 10:
+                raise HTTPException(status_code=429, detail=f"Voice rate limit reached; retry in {retry_after:.0f}s")
+            logger.info(f"TTS rate limited, retrying in {retry_after:.1f}s")
+            await asyncio.sleep(retry_after)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"TTS failed: {e}")
     # Return the exact words spoken so the chat can show them alongside the audio
     return {"text": spoken, "audio": base64.b64encode(audio.read()).decode(), "mime": "audio/wav"}
 

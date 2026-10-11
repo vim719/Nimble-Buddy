@@ -202,6 +202,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Prefer the most natural-sounding English female voice the device offers (closest to Hannah)
+  function pickNaturalVoice() {
+    const voices = (window.speechSynthesis.getVoices() || []).filter(v => /^en(-|_|$)/i.test(v.lang));
+    const preferences = [/premium/i, /enhanced/i, /natural/i, /neural/i, /\b(ava|samantha|allison|susan|zoe)\b/i, /google us english/i, /female/i];
+    for (const pattern of preferences) {
+      const match = voices.find(v => pattern.test(v.name));
+      if (match) return match;
+    }
+    return voices[0] || null;
+  }
+  if (window.speechSynthesis) window.speechSynthesis.getVoices(); // warm up the voice list
+
   function speakWithBrowser(markdown) {
     if (!window.speechSynthesis) return '';
     const plain = markdown
@@ -220,7 +232,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!summary) return '';
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(summary);
-    utterance.rate = 1.05;
+    const voice = pickNaturalVoice();
+    if (voice) utterance.voice = voice;
+    utterance.rate = 1.0;
     window.speechSynthesis.speak(utterance);
     return summary;
   }
