@@ -235,7 +235,7 @@ class NimbleToolkit:
             "results": sources
         }
 
-    async def web_agent(self, task: str, effort: str = "low", timeout_s: int = 150) -> Dict[str, Any]:
+    async def web_agent(self, task: str, effort: str = "low", timeout_s: int = 180) -> Dict[str, Any]:
         """Run a Nimble Web Search Agent: autonomous multi-step browsing with cited, confidence-scored claims"""
         if self.client:
             try:

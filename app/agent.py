@@ -314,6 +314,9 @@ class Agent:
             # Execute tool
             tool_name = tool_call.get("tool")
             params = tool_call.get("params", {})
+            if tool_name == "web_agent":
+                # LLM-expanded briefs made runs take minutes; the user's own words finish in ~20-30s
+                params = {"task": f"{message}\nKeep the answer concise.", "effort": "low"}
             tools_used.append({"tool": tool_name, "params": params})
 
             tool_result = await self.execute_tool(tool_name, params)
