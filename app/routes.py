@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import re
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile
@@ -8,6 +9,18 @@ from app.agent import Agent
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Vary delivery so consecutive spoken replies don't sound templated
+SPOKEN_TONES = [
+    "relaxed and matter-of-fact", "upbeat and curious", "warm and concise",
+    "like telling a friend something you just found out", "calm and confident", "lightly enthusiastic"
+]
+# Safety net: strip stock openers if the model uses one anyway
+FILLER_OPENER = re.compile(
+    r"^(sure thing|sure|certainly|absolutely|of course|great question|okay|ok|so|alright|happy to help|"
+    r"i'?d be happy to( help)?|i'?ll help you( with that)?)\b[\s,!.:—-]*",
+    re.IGNORECASE
+)
 
 router = APIRouter(prefix="/api")
 agent = Agent()
@@ -86,17 +99,28 @@ def _spoken_summary(text: str) -> str:
                 {"role": "system", "content": (
                     "Turn the assistant's answer into what a friendly, knowledgeable person would say out loud "
                     "in one or two short sentences, under 180 characters total. Natural and conversational, "
-                    "contractions welcome. No markdown, URLs, citations, emoji, or lists. Keep only facts from the answer."
+                    "contractions welcome. No markdown, URLs, citations, emoji, or lists. Keep only facts from the answer. "
+                    "Lead with the most interesting specific fact — a name, number, or finding. "
+                    "Never start with filler like 'Sure', 'Sure thing', 'Certainly', 'Absolutely', 'Of course', 'Great question', "
+                    "'So', 'Okay', 'Here's', or 'I'll help you'. "
+                    f"Tone for this reply: {random.choice(SPOKEN_TONES)}."
                 )},
                 {"role": "user", "content": clipped}
             ],
-            temperature=0.6,
+            temperature=0.9,
             max_tokens=400,
             reasoning_effort="low"
         )
         spoken = (completion.choices[0].message.content or "").strip()
+        while FILLER_OPENER.match(spoken):
+            spoken = FILLER_OPENER.sub("", spoken, count=1)
         if spoken:
-            return spoken[:200]
+            spoken = spoken[0].upper() + spoken[1:]
+            if len(spoken) > 220:
+                # End on a full sentence rather than mid-word
+                cut = max(spoken.rfind(p, 0, 220) for p in (". ", "! ", "? "))
+                spoken = spoken[:cut + 1] if cut > 40 else spoken[:220]
+            return spoken
     except Exception as e:
         logger.warning(f"Speech rewrite failed, using plain text: {e}")
     plain = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", clipped)

@@ -9,6 +9,12 @@ from app.nimble_tools import NimbleToolkit
 
 logger = logging.getLogger(__name__)
 
+# Replies that promise work instead of doing it ("Sure thing, I'll help you with...")
+PROMISE_PATTERN = re.compile(
+    r"\b(I'?ll|I will|let me|I'?m going to|one moment|give me a (sec|second|moment))\b.{0,40}\b(look|search|find|check|help|get|pull|dig)",
+    re.IGNORECASE
+)
+
 
 class Agent:
     def __init__(self, toolkit: Optional[NimbleToolkit] = None):
@@ -28,7 +34,12 @@ class Agent:
             f"You have access to these tools powered by Nimble:\n{tools_str}\n\n"
             "When the user asks something that requires internet access, respond with a JSON object:\n"
             '{"tool": "tool_name", "params": {"param_name": "value"}}\n\n'
-            "When you can answer directly without tools, just respond normally.\n"
+            "Always call a tool for anything about current events, prices, products, people, companies, places, weather, sports, or facts that could have changed. "
+            "Never reply with a promise like \"I'll look that up\" or \"Let me help you with that\" — call the tool instead. "
+            "If a request is ambiguous (e.g. 'the game last night'), make the most reasonable assumption, search, and mention the assumption. "
+            "Only answer without tools for greetings, small talk, or questions about yourself.\n"
+            "Style: start directly with the answer. Never open with filler such as 'Sure', 'Sure thing', 'Certainly', 'Absolutely', 'Of course', 'Great question', or 'I'd be happy to'. "
+            "Vary your phrasing from previous replies.\n"
             "When you receive tool results, synthesize them into a helpful, conversational response with key findings and source URLs.\n\n"
             f"Today's date is {date.today().isoformat()}.\n"
             "Grounding rules: only state facts, prices, specs, and dates that appear in the tool results. "
@@ -287,6 +298,17 @@ class Agent:
                     max_tokens=2048
                 )
                 reply = completion.choices[0].message
+                if not reply.tool_calls and PROMISE_PATTERN.search(reply.content or ""):
+                    # The model promised to help instead of acting; make it actually call a tool
+                    completion = self.client.chat.completions.create(
+                        model=settings.GROQ_MODEL,
+                        messages=messages,
+                        tools=self._tool_schemas(),
+                        tool_choice="required",
+                        temperature=0.3,
+                        max_tokens=2048
+                    )
+                    reply = completion.choices[0].message
                 if reply.tool_calls:
                     fn = reply.tool_calls[0].function
                     first_response = json.dumps({"tool": fn.name, "params": json.loads(fn.arguments or "{}")})
