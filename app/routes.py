@@ -1,20 +1,17 @@
 import asyncio
+import base64
 import logging
-import random
 import re
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from app.agent import Agent
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Vary delivery so consecutive spoken replies don't sound templated
-SPOKEN_TONES = [
-    "relaxed and matter-of-fact", "warm and concise", "calm and confident",
-    "like telling a friend something you just found out"
-]
+# Delivery style approved in testing (voice-samples/fixed_hannah_1.wav): two short, plain sentences
+SPOKEN_STYLE = "calm, plain and matter-of-fact, like a knowledgeable friend; exactly two short sentences"
 
 
 def _for_tts(text: str) -> str:
@@ -120,11 +117,11 @@ def _spoken_summary(text: str) -> str:
                     "At most one number per sentence. "
                     "Never start with filler like 'Sure', 'Sure thing', 'Certainly', 'Absolutely', 'Of course', 'Great question', "
                     "'So', 'Okay', 'Here's', or 'I'll help you'. "
-                    f"Tone for this reply: {random.choice(SPOKEN_TONES)}."
+                    f"Style: {SPOKEN_STYLE}."
                 )},
                 {"role": "user", "content": clipped}
             ],
-            temperature=0.7,
+            temperature=0.5,
             max_tokens=400,
             reasoning_effort="low"
         )
@@ -164,9 +161,8 @@ async def speak(request: SpeakRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"TTS failed: {e}")
-    # Header values must be a single printable line, or the response fails and the browser voice takes over
-    header_text = " ".join(spoken.encode("ascii", "ignore").decode().split())[:300]
-    return Response(content=audio.read(), media_type="audio/wav", headers={"X-Spoken-Text": header_text})
+    # Return the exact words spoken so the chat can show them alongside the audio
+    return {"text": spoken, "audio": base64.b64encode(audio.read()).decode(), "mime": "audio/wav"}
 
 
 @router.get("/status")

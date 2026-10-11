@@ -171,7 +171,18 @@ document.addEventListener('DOMContentLoaded', () => {
   // Natural voice (Orpheus TTS via /api/speak) first; browser voice if that's unavailable.
   let replyAudio = null;
 
-  async function speakReply(markdown) {
+  // Show the exact words being spoken at the top of the reply bubble, so voice and text match
+  function showSpokenLine(row, text) {
+    const bubble = row && row.querySelector('.message-bubble');
+    if (!bubble || !text) return;
+    const line = document.createElement('div');
+    line.className = 'spoken-line';
+    line.textContent = `🔊 ${text}`;
+    bubble.insertBefore(line, bubble.querySelector('.markdown-body'));
+    scrollToBottom();
+  }
+
+  async function speakReply(markdown, row) {
     if (replyAudio) replyAudio.pause();
     window.speechSynthesis && window.speechSynthesis.cancel();
     try {
@@ -180,19 +191,19 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: markdown })
       });
-      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-      const url = URL.createObjectURL(await res.blob());
-      replyAudio = new Audio(url);
-      replyAudio.onended = () => URL.revokeObjectURL(url);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      replyAudio = new Audio(`data:${data.mime};base64,${data.audio}`);
+      showSpokenLine(row, data.text);
       await replyAudio.play();
     } catch (err) {
       console.warn('Natural voice unavailable, using browser voice:', err.message);
-      speakWithBrowser(markdown);
+      showSpokenLine(row, speakWithBrowser(markdown));
     }
   }
 
   function speakWithBrowser(markdown) {
-    if (!window.speechSynthesis) return;
+    if (!window.speechSynthesis) return '';
     const plain = markdown
       .replace(/```[\s\S]*?```/g, ' ')
       .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
@@ -206,11 +217,12 @@ document.addEventListener('DOMContentLoaded', () => {
       .trim();
     const sentences = plain.match(/[^.!?]+[.!?]+/g) || [plain];
     const summary = sentences.slice(0, 3).join(' ').slice(0, 400);
-    if (!summary) return;
+    if (!summary) return '';
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(summary);
     utterance.rate = 1.05;
     window.speechSynthesis.speak(utterance);
+    return summary;
   }
 
   // Enter to send, Shift+Enter for newline
@@ -453,6 +465,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     chatMessages.appendChild(row);
     scrollToBottom();
+    return row;
   }
 
   // --- Typing Indicator ---
@@ -612,7 +625,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.totalSources += sources.length;
 
       // Render assistant message
-      appendAssistantMessage({
+      const assistantRow = appendAssistantMessage({
         response: aiResponse,
         tools_used: toolsUsed,
         sources: sources
@@ -629,7 +642,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Update inspector sidebar
       updateInspector(toolsUsed, sources);
 
-      if (state.speakNextReply) speakReply(aiResponse);
+      if (state.speakNextReply) speakReply(aiResponse, assistantRow);
 
     } catch (err) {
       console.error('Chat error:', err);
