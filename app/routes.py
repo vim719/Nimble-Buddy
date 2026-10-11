@@ -41,6 +41,17 @@ async def chat(request: ChatRequest):
     return result
 
 
+@router.get("/status")
+async def get_status():
+    """
+    Report which integrations are live. Never returns key values.
+    """
+    return {
+        "nimble": "live" if agent.toolkit.is_live else "sandbox",
+        "llm": "groq" if agent.client else "rule-based planner"
+    }
+
+
 @router.get("/tools")
 async def get_tools():
     """

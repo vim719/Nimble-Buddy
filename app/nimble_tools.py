@@ -1,9 +1,36 @@
+import asyncio
 import logging
+import time
+import urllib.parse
 from typing import Any, Dict, List
 from nimble_python import Nimble
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# A single, reused Web Search Agent so demo runs don't burn through trial agent slots.
+AGENT_NAME = "nimble-buddy-research"
+AGENT_TERMINAL_STATES = {"completed", "failed", "cancelled"}
+
+
+def _get(obj: Any, key: str, default: Any = None) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _parse_results(result: Any, default_title: str) -> List[Dict[str, Any]]:
+    parsed = []
+    for r in _get(result, "results", []) or []:
+        snippet = _get(r, "description") or _get(r, "snippet") or ""
+        if not snippet:
+            snippet = (_get(r, "content") or "")[:300]
+        parsed.append({
+            "title": _get(r, "title") or default_title,
+            "url": _get(r, "url", ""),
+            "snippet": snippet
+        })
+    return parsed
 
 
 class NimbleToolkit:
@@ -19,56 +46,51 @@ class NimbleToolkit:
         else:
             self.client = None
 
-    async def web_search(self, query: str, max_results: int = 5) -> Dict[str, Any]:
-        """Search the live web using Nimble Search API"""
+    @property
+    def is_live(self) -> bool:
+        return self.client is not None
+
+    def _error(self, tool: str, e: Exception, **extra: Any) -> Dict[str, Any]:
+        logger.warning(f"Live Nimble {tool} failed: {e}")
+        return {"tool": tool, "error": f"Nimble {tool} failed: {e}", "results": [], **extra}
+
+    async def web_search(self, query: str, max_results: int = 5, focus: str = "general") -> Dict[str, Any]:
+        """Search the live web using Nimble Search, with a synthesized answer and citations"""
         if self.client:
             try:
-                result = self.client.search(
+                result = await asyncio.to_thread(
+                    self.client.search,
                     query=query,
-                    max_results=max_results
+                    max_results=max_results,
+                    focus=focus,
+                    include_answer=True
                 )
-                raw_results = getattr(result, "results", []) or []
-                parsed_results = []
-                for r in raw_results:
-                    title = getattr(r, "title", "") if not isinstance(r, dict) else r.get("title", "")
-                    url = getattr(r, "url", "") if not isinstance(r, dict) else r.get("url", "")
-                    snippet = getattr(r, "snippet", "") if not isinstance(r, dict) else r.get("snippet", "")
-                    parsed_results.append({
-                        "title": title or "Web Result",
-                        "url": url,
-                        "snippet": snippet
-                    })
-
-                if parsed_results:
-                    return {
-                        "tool": "web_search",
-                        "query": query,
-                        "results": parsed_results
-                    }
+                return {
+                    "tool": "web_search",
+                    "query": query,
+                    "focus": focus,
+                    "answer": _get(result, "answer"),
+                    "results": _parse_results(result, "Web Result")
+                }
             except Exception as e:
-                logger.warning(f"Live Nimble search failed for '{query}': {e}. Using structured fallback.")
+                return self._error("web_search", e, query=query)
 
-        # Structured fallback results matching query
-        import urllib.parse
+        # Sandbox mode (no API key): clearly labelled placeholder links, not real data
         encoded_q = urllib.parse.quote(query)
         return {
             "tool": "web_search",
             "query": query,
+            "sandbox": True,
             "results": [
                 {
-                    "title": f"{query.title()} - Live Web Intelligence & Overview",
+                    "title": f"[Sandbox] Google results for '{query}'",
                     "url": f"https://www.google.com/search?q={encoded_q}",
-                    "snippet": f"Real-time web coverage and key facts regarding '{query}'. Powered by Nimble Web Search pipeline with structured intent understanding."
+                    "snippet": "Sandbox mode: add NIMBLE_API_KEY to .env for live Nimble Search results."
                 },
                 {
-                    "title": f"Latest Analysis and Verified Insights: {query.title()}",
+                    "title": f"[Sandbox] News results for '{query}'",
                     "url": f"https://news.google.com/search?q={encoded_q}",
-                    "snippet": f"In-depth developments, verified citations, and live coverage of {query}. Real-time SERP data collected through residential proxies."
-                },
-                {
-                    "title": f"{query.title()} - Official Documentation & Source Reference",
-                    "url": f"https://en.wikipedia.org/wiki/Special:Search?search={encoded_q}",
-                    "snippet": f"Background knowledge, authoritative summaries, and contextual references for {query}."
+                    "snippet": "Sandbox mode: add NIMBLE_API_KEY to .env for live Nimble Search results."
                 }
             ]
         }
@@ -77,92 +99,61 @@ class NimbleToolkit:
         """Extract clean content from a webpage using Nimble Extract"""
         if self.client:
             try:
-                result = self.client.extract.run(
+                result = await asyncio.to_thread(
+                    self.client.extract.run,
                     url=url,
                     render=True,
                     formats=["markdown"]
                 )
-                data = getattr(result, "data", None)
-                if data is not None and hasattr(data, "markdown"):
-                    content = data.markdown
-                elif isinstance(data, dict) and "markdown" in data:
-                    content = data["markdown"]
-                elif data is not None:
-                    content = str(data)
-                else:
-                    content = str(result)
-
-                if content:
-                    return {
-                        "tool": "extract_page",
-                        "url": url,
-                        "content": content
-                    }
+                data = _get(result, "data")
+                content = _get(data, "markdown") if data is not None else None
+                if not content:
+                    content = str(data if data is not None else result)
+                return {
+                    "tool": "extract_page",
+                    "url": url,
+                    "content": content
+                }
             except Exception as e:
-                logger.warning(f"Live Nimble extract failed for '{url}': {e}. Using structured fallback.")
+                return self._error("extract_page", e, url=url, content="")
 
-        # Structured fallback extraction
         return {
             "tool": "extract_page",
             "url": url,
-            "content": f"# Extracted Page Content: {url}\n\n**Source URL**: {url}\n\n## Summary\nExtracted clean content using Nimble's stealth browser crawler with full JavaScript rendering enabled. Cookie banners, tracking scripts, and advertisements were automatically stripped.\n\n### Key Information\n- Clean Markdown extracted without DOM distortion.\n- Anti-bot evasion verified across residential IP fabric.\n- Full text ready for LLM consumption."
+            "sandbox": True,
+            "content": f"# [Sandbox] {url}\n\nSandbox mode: add NIMBLE_API_KEY to .env to extract this page live with Nimble Extract (JS rendering, clean Markdown)."
         }
 
     async def shop_search(self, product_query: str) -> Dict[str, Any]:
-        """Search for products and compare prices using Nimble"""
+        """Search for products and compare prices using Nimble's shopping focus"""
         if self.client:
             try:
-                result = self.client.search(
-                    query=f"{product_query} buy price",
-                    max_results=8
+                result = await asyncio.to_thread(
+                    self.client.search,
+                    query=product_query,
+                    max_results=8,
+                    focus="shopping",
+                    include_answer=True
                 )
-                raw_results = getattr(result, "results", []) or []
-                parsed_results = []
-                for r in raw_results:
-                    title = getattr(r, "title", "") if not isinstance(r, dict) else r.get("title", "")
-                    url = getattr(r, "url", "") if not isinstance(r, dict) else r.get("url", "")
-                    snippet = getattr(r, "snippet", "") if not isinstance(r, dict) else r.get("snippet", "")
-                    parsed_results.append({
-                        "title": title or "Product Result",
-                        "url": url,
-                        "snippet": snippet
-                    })
-
-                if parsed_results:
-                    return {
-                        "tool": "shop_search",
-                        "query": product_query,
-                        "results": parsed_results
-                    }
+                return {
+                    "tool": "shop_search",
+                    "query": product_query,
+                    "answer": _get(result, "answer"),
+                    "results": _parse_results(result, "Product Result")
+                }
             except Exception as e:
-                logger.warning(f"Live Nimble shop search failed for '{product_query}': {e}. Using structured fallback.")
+                return self._error("shop_search", e, query=product_query)
 
-        # Structured shopping deals fallback
-        import urllib.parse
         encoded_p = urllib.parse.quote(product_query)
         return {
             "tool": "shop_search",
             "query": product_query,
+            "sandbox": True,
             "results": [
                 {
-                    "title": f"Sony WH-1000XM4 Wireless Noise-Cancelling Headphones - $198.00 (Reg $348.00)",
-                    "url": "https://www.amazon.com/dp/B0863TXGM3",
-                    "snippet": "Industry-leading noise canceling with Dual Noise Sensor technology. 30-hour battery life, quick charge. Rated 4.7/5 stars with 50,000+ reviews."
-                },
-                {
-                    "title": f"Anker Soundcore Space One Active Noise Cancelling - $79.99 (4.6★)",
-                    "url": "https://us.soundcore.com/products/space-one-a3035",
-                    "snippet": "2X stronger voice reduction, 40H ANC playtime, LDAC wireless Hi-Res audio. Best budget wireless ANC headphones under $100."
-                },
-                {
-                    "title": f"Bose QuietComfort 45 Bluetooth Headphones - $199.00 Refurbished / Sale",
-                    "url": "https://www.bose.com/p/headphones/bose-quietcomfort-45",
-                    "snippet": "High-fidelity audio with volume-optimized active EQ. Aware mode and Quiet mode. 24 hours of listening on a single charge."
-                },
-                {
-                    "title": f"Sennheiser Accentum Plus Wireless Headphones - $179.95",
-                    "url": "https://www.sennheiser-hearing.com/accentum-plus",
-                    "snippet": "Hybrid active noise cancellation, 50-hour battery life, quick charge 10 mins for 5 hours. Touch gesture controls."
+                    "title": f"[Sandbox] Google Shopping: {product_query}",
+                    "url": f"https://www.google.com/search?tbm=shop&q={encoded_p}",
+                    "snippet": "Sandbox mode: add NIMBLE_API_KEY to .env for live prices via Nimble Search (shopping focus)."
                 }
             ]
         }
@@ -171,27 +162,17 @@ class NimbleToolkit:
         """Deep research a topic by searching + extracting top results"""
         try:
             search_results = await self.web_search(topic, max_results=3)
-            extracted = []
-            for r in search_results.get("results", [])[:2]:
-                url = r.get("url")
-                if not url:
-                    continue
-                try:
-                    page = await self.extract_page(url)
-                    extracted.append({
-                        "url": url,
-                        "title": r.get("title", ""),
-                        "content": page.get("content", "")[:2000]
-                    })
-                except Exception as e:
-                    extracted.append({
-                        "url": url,
-                        "title": r.get("title", ""),
-                        "error": str(e)
-                    })
+            urls = [r.get("url") for r in search_results.get("results", [])[:2] if r.get("url")]
+            pages = await asyncio.gather(*(self.extract_page(u) for u in urls))
+            titles = {r.get("url"): r.get("title", "") for r in search_results.get("results", [])}
+            extracted = [
+                {"url": p.get("url"), "title": titles.get(p.get("url"), ""), "content": (p.get("content") or "")[:2000]}
+                for p in pages
+            ]
             return {
                 "tool": "research_topic",
                 "topic": topic,
+                "answer": search_results.get("answer"),
                 "sources": extracted
             }
         except Exception as e:
@@ -203,6 +184,65 @@ class NimbleToolkit:
                 "sources": []
             }
 
+    def _run_agent_blocking(self, task: str, effort: str, timeout_s: int) -> Dict[str, Any]:
+        run = self.client.agents.run(input=task, agent_name=AGENT_NAME, effort=effort)
+        run_id = _get(run, "id")
+        agent_id = _get(run, "web_search_agent_id")
+        status = _get(run, "status")
+
+        deadline = time.time() + timeout_s
+        while status not in AGENT_TERMINAL_STATES and time.time() < deadline:
+            time.sleep(3)
+            status = _get(self.client.agents.runs.get(run_id, agent_id=agent_id), "status")
+
+        base = {"tool": "web_agent", "task": task, "effort": effort, "run_id": run_id, "agent_id": agent_id, "status": status}
+        if status != "completed":
+            msg = "still running" if status not in AGENT_TERMINAL_STATES else status
+            return {**base, "error": f"Agent run {msg} after {timeout_s}s", "results": []}
+
+        result = self.client.agents.runs.result(run_id, agent_id=agent_id)
+        output = _get(result, "output")
+        trust = _get(output, "trust")
+        claims = [
+            {
+                "callout": _get(c, "callout"),
+                "confidence": _get(c, "confidence"),
+                "citations": [{"url": _get(ci, "url"), "title": _get(ci, "title")} for ci in (_get(c, "citations") or [])]
+            }
+            for c in (_get(trust, "claims") or [])
+        ]
+        sources = []
+        seen = set()
+        for c in claims:
+            for ci in c["citations"]:
+                if ci["url"] and ci["url"] not in seen:
+                    seen.add(ci["url"])
+                    sources.append({"title": ci["title"] or ci["url"], "url": ci["url"], "snippet": ""})
+        return {
+            **base,
+            "output_type": _get(output, "type"),
+            "answer": _get(output, "content") or _get(output, "text") or _get(output, "data"),
+            "claims": claims,
+            "results": sources
+        }
+
+    async def web_agent(self, task: str, effort: str = "low", timeout_s: int = 150) -> Dict[str, Any]:
+        """Run a Nimble Web Search Agent: autonomous multi-step browsing with cited, confidence-scored claims"""
+        if self.client:
+            try:
+                return await asyncio.to_thread(self._run_agent_blocking, task, effort, timeout_s)
+            except Exception as e:
+                return self._error("web_agent", e, task=task)
+
+        return {
+            "tool": "web_agent",
+            "task": task,
+            "sandbox": True,
+            "answer": "Sandbox mode: add NIMBLE_API_KEY to .env to dispatch a live Nimble Web Search Agent.",
+            "claims": [],
+            "results": []
+        }
+
     async def draft_or_send_email(self, to_email: str, subject: str, body: str, action: str = "draft") -> Dict[str, Any]:
         """Draft or dispatch an email on behalf of the user with internet findings, shopping links, or research summaries."""
         to_email = (to_email or "recipient@example.com").strip()
@@ -210,7 +250,6 @@ class NimbleToolkit:
         body = (body or "").strip()
         action_mode = "sent" if action.lower() == "send" else "draft"
 
-        import urllib.parse
         encoded_subject = urllib.parse.quote(subject)
         encoded_body = urllib.parse.quote(body)
         mailto_url = f"mailto:{to_email}?subject={encoded_subject}&body={encoded_body}"
@@ -222,7 +261,7 @@ class NimbleToolkit:
             "subject": subject,
             "body": body,
             "mailto_url": mailto_url,
-            "status": "Email dispatched to delivery queue" if action_mode == "sent" else "Email draft prepared for review",
+            "status": "Email ready - open the link to send from your mail client" if action_mode == "sent" else "Email draft prepared for review",
             "results": [
                 {
                     "title": f"Email {action_mode.capitalize()}: {subject}",
@@ -237,8 +276,8 @@ class NimbleToolkit:
         return [
             {
                 "name": "web_search",
-                "description": "Search the internet for current information, live events, or facts using Nimble Search.",
-                "parameters": {"query": "search query string"}
+                "description": "Quick lookup of current information, live events, or facts using Nimble Search. Returns a synthesized answer plus source links. Use focus='news' for recent news.",
+                "parameters": {"query": "search query string", "focus": "'general' (default) or 'news'"}
             },
             {
                 "name": "extract_page",
@@ -252,8 +291,13 @@ class NimbleToolkit:
             },
             {
                 "name": "research_topic",
-                "description": "Do deep research on a topic by performing multi-query Nimble search and page extraction across top sources.",
+                "description": "Fast research: Nimble search plus extraction of the top sources' full text.",
                 "parameters": {"topic": "topic to research"}
+            },
+            {
+                "name": "web_agent",
+                "description": "Dispatch an autonomous Nimble Web Search Agent for multi-step work: competitor analysis, company deep dives, comparisons, building lists of entities, or any question needing many sources. Slower (30-120s) but returns verified claims with citations and confidence. Prefer this when the user says 'agent', 'deep dive', 'compare', 'find all', or 'investigate'.",
+                "parameters": {"task": "full task instructions for the agent", "effort": "'low' (fast, default) or 'medium' (more thorough)"}
             },
             {
                 "name": "draft_or_send_email",

@@ -13,7 +13,7 @@ class Agent:
     def __init__(self, toolkit: Optional[NimbleToolkit] = None):
         self.toolkit = toolkit or NimbleToolkit()
         self.client = None
-        if settings.GROQ_API_KEY:
+        if settings.GROQ_API_KEY and settings.GROQ_API_KEY != "your-groq-api-key":
             try:
                 self.client = Groq(api_key=settings.GROQ_API_KEY)
             except Exception as e:
@@ -69,7 +69,15 @@ class Agent:
         """Execute a tool via NimbleToolkit."""
         if tool_name == "web_search":
             query = params.get("query", "")
-            return await self.toolkit.web_search(query=query)
+            focus = params.get("focus", "general")
+            return await self.toolkit.web_search(query=query, focus=focus if focus in ("general", "news") else "general")
+        elif tool_name == "research_topic":
+            topic = params.get("topic") or params.get("query", "")
+            return await self.toolkit.research_topic(topic=topic)
+        elif tool_name == "web_agent":
+            task = params.get("task") or params.get("query", "")
+            effort = params.get("effort", "low")
+            return await self.toolkit.web_agent(task=task, effort=effort if effort in ("low", "medium") else "low")
         elif tool_name == "extract_page":
             url = params.get("url", "")
             return await self.toolkit.extract_page(url=url)
@@ -127,7 +135,25 @@ class Agent:
                 "sources": sources
             }
 
-        # 3. Shopping detection
+        # 3. Web Search Agent for multi-step tasks
+        if any(w in lowered for w in ["agent", "competitor", "compare", "deep dive", "investigate", "find all", "list of"]):
+            tool_name = "web_agent"
+            params = {"task": message, "effort": "low"}
+            tools_used.append({"tool": tool_name, "params": params})
+            tool_result = await self.execute_tool(tool_name, params)
+            for item in tool_result.get("results", []):
+                if item.get("url"):
+                    sources.append({"title": item.get("title", "Source"), "url": item["url"]})
+            answer = tool_result.get("answer") or tool_result.get("error") or "The agent returned no output."
+            if not isinstance(answer, str):
+                answer = "```json\n" + json.dumps(answer, indent=2, ensure_ascii=False) + "\n```"
+            return {
+                "response": f"🤖 **Nimble Web Search Agent** finished ({len(tool_result.get('claims', []))} cited claims, {len(sources)} sources):\n\n{answer}",
+                "tools_used": tools_used,
+                "sources": sources
+            }
+
+        # 4. Shopping detection
         if any(w in lowered for w in ["buy", "shop", "price", "deals", "cost", "store", "headphones", "laptop", "product"]):
             cleaned_query = re.sub(r'^(find|search|show|get|buy|shop for|look for)\s+', '', lowered, flags=re.IGNORECASE)
             tool_name = "shop_search"
@@ -149,7 +175,7 @@ class Agent:
                 "sources": sources
             }
 
-        # 4. Research detection
+        # 5. Research detection
         if any(w in lowered for w in ["research", "deep dive", "analyze", "comprehensive", "history of", "overview of"]):
             tool_name = "research_topic"
             params = {"topic": message}
@@ -166,7 +192,7 @@ class Agent:
                 "sources": sources
             }
 
-        # 5. General Web Search default
+        # 6. General Web Search default
         tool_name = "web_search"
         params = {"query": message}
         tools_used.append({"tool": tool_name, "params": params})
@@ -179,7 +205,11 @@ class Agent:
         results_list = tool_result.get("results", [])
         if results_list:
             res_md = "\n".join([f"- **[{r['title']}]({r['url']})**: {r.get('snippet', '')}" for r in results_list[:3]])
-            final_text = f"🌐 Live internet results for **'{message}'** via Nimble Web Search:\n\n{res_md}"
+            answer = tool_result.get("answer")
+            answer_md = f"{answer}\n\n**Sources:**\n" if answer else ""
+            final_text = f"🌐 Live internet results for **'{message}'** via Nimble Web Search:\n\n{answer_md}{res_md}"
+        elif tool_result.get("error"):
+            final_text = f"⚠️ {tool_result['error']}"
         else:
             final_text = f"I searched the live web for **'{message}'** via Nimble. Please check the sources inspector for details."
 
@@ -244,7 +274,7 @@ class Agent:
             messages.append({"role": "assistant", "content": first_response})
             messages.append({
                 "role": "user",
-                "content": f"Tool execution result for {tool_name}:\n{json.dumps(tool_result, ensure_ascii=False)}\n\nPlease synthesize this into a final response."
+                "content": f"Tool execution result for {tool_name}:\n{json.dumps(tool_result, ensure_ascii=False, default=str)[:12000]}\n\nPlease synthesize this into a final response."
             })
 
             final_completion = self.client.chat.completions.create(
