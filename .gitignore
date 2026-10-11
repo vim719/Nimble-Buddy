@@ -8,3 +8,4 @@ venv/
 *.pem
 *.key
 .claude/
+voice-samples/
