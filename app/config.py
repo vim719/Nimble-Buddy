@@ -9,6 +9,6 @@ load_dotenv(dotenv_path=BASE_DIR / ".env")
 class Settings:
     NIMBLE_API_KEY: str = os.environ.get("NIMBLE_API_KEY", "")
     GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "")
-    GROQ_MODEL: str = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+    GROQ_MODEL: str = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 
 settings = Settings()

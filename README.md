@@ -11,7 +11,7 @@
 | # | Capability | Try saying | Nimble product |
 |---|---|---|---|
 | 1 | 🤖 **Autonomous web agent** | "Use an agent to compare Nimble vs Bright Data for AI scraping" | **Web Search Agent** (`agents.run`): multi-step browsing, cited claims with confidence |
-| 2 | 🛍️ **Live price comparison** | "Find the best noise cancelling headphones under $200" | **Search** (`focus="shopping"`) |
+| 2 | 🛍️ **Live price comparison** | "Find the best noise cancelling headphones under $200" | **Search** + **Answer** restricted to retailer & review sites (~3 s) |
 | 3 | 🌐 **Live answers** | "What's new in AI today?" | **Search** + **Answer** (`include_answer=True`, `focus="news"`) |
 | 4 | 📄 **Read any page** | "Summarize https://docs.nimbleway.com" | **Extract** (`render=True`, Markdown) |
 | 5 | 🔬 **Fast research** | "Research the history of web scraping" | Search + parallel Extract of top sources |
@@ -46,7 +46,7 @@ Fill in:
 ```bash
 NIMBLE_API_KEY=...   # https://online.nimbleway.com/settings/api-keys
 GROQ_API_KEY=...     # optional, free at https://console.groq.com
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 ```
 
 **Key safety rules**
@@ -138,7 +138,7 @@ User (Voice / Text)
 | Tool | SDK call | Notes |
 |---|---|---|
 | `web_search` | `client.search(query, focus, include_answer=True)` | Returns answer + results (`title`, `url`, `description`) |
-| `shop_search` | `client.search(query, focus="shopping")` | Live product listings |
+| `shop_search` | `client.search(query, include_answer=True, include_domains=[bestbuy, amazon, walmart, target, rtings])` | ~3 s. (`focus="shopping"` works but took ~60 s in testing, too slow for a live demo) |
 | `extract_page` | `client.extract.run(url, render=True, formats=["markdown"])` | JS-rendered clean Markdown |
 | `research_topic` | search + concurrent `extract.run` on top 2 results | Fast multi-source research |
 | `web_agent` | `client.agents.run(input, agent_name="nimble-buddy-research", effort="low")`, then `agents.runs.get` / `agents.runs.result` | Reuses **one** named agent so demo runs don't consume extra trial agent slots. Output includes `trust.claims[]` with `confidence` and `citations` |
@@ -163,6 +163,8 @@ With no Nimble key, tools return clearly labelled `[Sandbox]` placeholder links 
 | Agent says "still running after 150s" | Retry with effort `low`; the run continues server-side and can be checked in the Nimble dashboard |
 | Every reply is keyword-based | No Groq key — add `GROQ_API_KEY` (optional) |
 | Mic doesn't work | Use Chrome; allow microphone permission for localhost |
+| `429 Rate limit reached` from Groq | Free tier allows ~8k tokens/min. Wait ~30 s between demo prompts, or upgrade to Groq Dev Tier. The app falls back to the rule-based planner automatically |
+| Shopping answer has no prices | Nimble only returns what the sources list; the model is instructed not to invent prices |
 
 ---
 
@@ -177,7 +179,7 @@ With no Nimble key, tools return clearly labelled `[Sandbox]` placeholder links 
 ## 🙏 Credits & disclosure
 - Based on [MITRAKER/nimble-companion](https://github.com/MITRAKER/nimble-companion); renamed to NimbleBuddy and extended during AI Engineer NYC 2026 (Web Search Agent integration, shopping/news focus, answer synthesis, honest sandbox mode, secret-handling hardening, demo runbook).
 - **AI assistance:** Antigravity AI and Claude Code were used as coding assistants.
-- **Runtime LLM:** Groq Llama 3.3 70B Versatile.
+- **Runtime LLM:** Groq `openai/gpt-oss-120b` with native function calling (Llama 3.3 70B was retired on Groq).
 - **Web data:** Nimble Python SDK (`nimble_python`) — Search, Extract, Web Search Agents.
 
 MLH rules: repo must stay public; demo video ≤ 2 minutes. Judging: Technology, Design, Completion, Learning (25% each).

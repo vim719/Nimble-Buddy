@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 # A single, reused Web Search Agent so demo runs don't burn through trial agent slots.
 AGENT_NAME = "nimble-buddy-research"
 AGENT_TERMINAL_STATES = {"completed", "failed", "cancelled"}
+SHOPPING_DOMAINS = ["bestbuy.com", "amazon.com", "walmart.com", "target.com", "rtings.com"]
 
 
 def _get(obj: Any, key: str, default: Any = None) -> Any:
@@ -22,9 +23,15 @@ def _get(obj: Any, key: str, default: Any = None) -> Any:
 def _parse_results(result: Any, default_title: str) -> List[Dict[str, Any]]:
     parsed = []
     for r in _get(result, "results", []) or []:
+        if not _get(r, "url"):
+            continue
         snippet = _get(r, "description") or _get(r, "snippet") or ""
         if not snippet:
             snippet = (_get(r, "content") or "")[:300]
+        if not snippet:
+            source_agent = _get(_get(r, "metadata"), "agent_name") or ""
+            store = source_agent.replace("_serp", "").replace("_", " ").title()
+            snippet = f"Live listing from {store}" if store else ""
         parsed.append({
             "title": _get(r, "title") or default_title,
             "url": _get(r, "url", ""),
@@ -125,15 +132,17 @@ class NimbleToolkit:
         }
 
     async def shop_search(self, product_query: str) -> Dict[str, Any]:
-        """Search for products and compare prices using Nimble's shopping focus"""
+        """Search for products and compare prices across retailer and review sites using Nimble Search"""
         if self.client:
             try:
+                # focus="shopping" fans out to store SERPs and takes ~60s; restricting general
+                # search to retailer and review sites returns a cited answer in ~3s
                 result = await asyncio.to_thread(
                     self.client.search,
-                    query=product_query,
+                    query=f"{product_query} price",
                     max_results=8,
-                    focus="shopping",
-                    include_answer=True
+                    include_answer=True,
+                    include_domains=SHOPPING_DOMAINS
                 )
                 return {
                     "tool": "shop_search",
@@ -286,7 +295,7 @@ class NimbleToolkit:
             },
             {
                 "name": "shop_search",
-                "description": "Search for products to buy, compare real-time prices across stores, and find product specs.",
+                "description": "Always use this for any product, shopping, deal, or price request: live listings from real stores in a few seconds.",
                 "parameters": {"product_query": "product to search for"}
             },
             {
@@ -296,7 +305,7 @@ class NimbleToolkit:
             },
             {
                 "name": "web_agent",
-                "description": "Dispatch an autonomous Nimble Web Search Agent for multi-step work: competitor analysis, company deep dives, comparisons, building lists of entities, or any question needing many sources. Slower (30-120s) but returns verified claims with citations and confidence. Prefer this when the user says 'agent', 'deep dive', 'compare', 'find all', or 'investigate'.",
+                "description": "Dispatch an autonomous Nimble Web Search Agent for multi-step work: competitor analysis, company deep dives, comparisons, building lists of entities, or any question needing many sources. Slower (30-120s) but returns verified claims with citations and confidence. Prefer this when the user says 'agent', 'deep dive', 'compare', 'find all', or 'investigate'. Do not use it for simple shopping or price lookups.",
                 "parameters": {"task": "full task instructions for the agent", "effort": "'low' (fast, default) or 'medium' (more thorough)"}
             },
             {

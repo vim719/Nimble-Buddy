@@ -507,7 +507,15 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ message: userText })
+        // Send recent turns so follow-ups like "email that summary" have context
+        body: JSON.stringify({
+          message: userText,
+          history: state.messages
+            .slice(0, -1)
+            .filter(m => m.text)
+            .slice(-6)
+            .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text.slice(0, 3000) }))
+        })
       });
 
       if (!response.ok) {
