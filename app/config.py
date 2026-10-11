@@ -13,7 +13,7 @@ class Settings:
     # Natural-sounding voice replies (Orpheus TTS on Groq) and the small model that
     # rewrites answers into a short spoken style. Separate model = separate rate limit.
     TTS_MODEL: str = os.environ.get("TTS_MODEL", "canopylabs/orpheus-v1-english")
-    TTS_VOICE: str = os.environ.get("TTS_VOICE", "autumn")
+    TTS_VOICE: str = os.environ.get("TTS_VOICE", "hannah")
     SPEECH_STYLE_MODEL: str = os.environ.get("SPEECH_STYLE_MODEL", "openai/gpt-oss-20b")
 
 settings = Settings()
