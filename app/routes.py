@@ -1,8 +1,13 @@
 import asyncio
+import logging
+import re
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 from app.agent import Agent
+from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 agent = Agent()
@@ -65,6 +70,60 @@ async def transcribe(audio: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
     return {"text": (getattr(result, "text", "") or "").strip()}
+
+
+class SpeakRequest(BaseModel):
+    text: str = Field(..., description="Assistant reply (markdown) to speak")
+
+
+def _spoken_summary(text: str) -> str:
+    """Rewrite a markdown answer as one or two casual spoken sentences."""
+    clipped = text[:3000]
+    try:
+        completion = agent.client.chat.completions.create(
+            model=settings.SPEECH_STYLE_MODEL,
+            messages=[
+                {"role": "system", "content": (
+                    "Turn the assistant's answer into what a friendly, knowledgeable person would say out loud "
+                    "in one or two short sentences, under 180 characters total. Natural and conversational, "
+                    "contractions welcome. No markdown, URLs, citations, emoji, or lists. Keep only facts from the answer."
+                )},
+                {"role": "user", "content": clipped}
+            ],
+            temperature=0.6,
+            max_tokens=400,
+            reasoning_effort="low"
+        )
+        spoken = (completion.choices[0].message.content or "").strip()
+        if spoken:
+            return spoken[:200]
+    except Exception as e:
+        logger.warning(f"Speech rewrite failed, using plain text: {e}")
+    plain = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", clipped)
+    plain = re.sub(r"https?://\S+|[#*_`>|]|\[\d+\]", " ", plain)
+    return " ".join(plain.split())[:200]
+
+
+@router.post("/speak")
+async def speak(request: SpeakRequest):
+    """
+    Human-sounding voice reply: rewrite the answer in spoken style, then synthesize
+    it with Orpheus TTS on Groq. The frontend falls back to the browser voice on error.
+    """
+    if not agent.client:
+        raise HTTPException(status_code=503, detail="Voice replies need GROQ_API_KEY in .env")
+    spoken = await asyncio.to_thread(_spoken_summary, request.text)
+    try:
+        audio = await asyncio.to_thread(
+            agent.client.audio.speech.create,
+            model=settings.TTS_MODEL,
+            voice=settings.TTS_VOICE,
+            input=spoken,
+            response_format="wav"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"TTS failed: {e}")
+    return Response(content=audio.read(), media_type="audio/wav", headers={"X-Spoken-Text": spoken.encode("ascii", "ignore").decode()})
 
 
 @router.get("/status")

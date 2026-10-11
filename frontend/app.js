@@ -161,13 +161,37 @@ document.addEventListener('DOMContentLoaded', () => {
     voiceBtn.addEventListener('click', () => {
       if (state.isGenerating) return;
       window.speechSynthesis && window.speechSynthesis.cancel();
+      if (replyAudio) replyAudio.pause();
       if (isListening) stopRecording();
       else startRecording();
     });
   }
 
   // --- Voice Output: read a short version of the reply aloud after a spoken question ---
-  function speakReply(markdown) {
+  // Natural voice (Orpheus TTS via /api/speak) first; browser voice if that's unavailable.
+  let replyAudio = null;
+
+  async function speakReply(markdown) {
+    if (replyAudio) replyAudio.pause();
+    window.speechSynthesis && window.speechSynthesis.cancel();
+    try {
+      const res = await fetch('/api/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: markdown })
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      const url = URL.createObjectURL(await res.blob());
+      replyAudio = new Audio(url);
+      replyAudio.onended = () => URL.revokeObjectURL(url);
+      await replyAudio.play();
+    } catch (err) {
+      console.warn('Natural voice unavailable, using browser voice:', err.message);
+      speakWithBrowser(markdown);
+    }
+  }
+
+  function speakWithBrowser(markdown) {
     if (!window.speechSynthesis) return;
     const plain = markdown
       .replace(/```[\s\S]*?```/g, ' ')
