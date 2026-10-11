@@ -76,6 +76,42 @@ If step 3 is slow, keep effort at `low` (the default). Run it once **before** go
 
 ### Step 6 — Rehearse the demo (2 minutes, see script below)
 
+### Step 6½ — (Optional) Share a public demo link with Cloudflare Tunnel
+Give judges a live HTTPS link they can open on their own phones — **free, no Cloudflare account, no API key**. The app keeps running on your laptop, so your keys never leave `.env`.
+
+**How it works:** a [Cloudflare Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/) opens an outbound connection from your machine to Cloudflare and gives you a random `https://<words>.trycloudflare.com` URL that forwards to `localhost:8000`. No ports are opened on your router.
+
+```
+Judge's phone ──HTTPS──▶ Cloudflare edge ──tunnel──▶ cloudflared (your laptop) ──▶ localhost:8000 (NimbleBuddy)
+```
+
+1. Install `cloudflared` once:
+   ```bash
+   brew install cloudflared
+   ```
+   (Windows/Linux: [download page](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/))
+2. Start the app (terminal 1):
+   ```bash
+   ./venv/bin/uvicorn app.main:app --port 8000
+   ```
+3. Start the tunnel (terminal 2):
+   ```bash
+   ./scripts/share.sh
+   ```
+   It checks the app is running, then prints a URL like `https://example-words-here.trycloudflare.com`. Equivalent raw command:
+   ```bash
+   cloudflared tunnel --url http://localhost:8000
+   ```
+4. Open the URL on your phone to confirm it works, then share it (submission form, QR code on screen, etc.).
+5. Press **Ctrl+C** in terminal 2 when the demo ends. The URL stops working immediately.
+
+**Things to know**
+- ⚠️ Anyone with the URL can use your **Nimble credits** and **Groq quota**. Share it only during judging and stop it afterwards.
+- The URL is **random and changes every run** — don't print it in slides ahead of time.
+- Quick Tunnels are for testing/demos: no uptime guarantee and a cap on concurrent requests. For a permanent URL, create a named tunnel with a free Cloudflare account (`cloudflared tunnel login`).
+- The microphone works over the tunnel because the link is HTTPS (browsers block mic access on plain HTTP).
+- If the tunnel shows a Cloudflare `502`, the app isn't running on port 8000 — restart it in terminal 1.
+
 ### Step 7 — Record the demo video and submit
 - MLH requires ≤ 2 minutes, starting with: *"Hey, I'm [Your Name], and this is my demo for AI Engineer NYC 2026."*
 - Show the live product, not slides.
@@ -165,6 +201,14 @@ With no Nimble key, tools return clearly labelled `[Sandbox]` placeholder links 
 | Mic doesn't work | Use Chrome; allow microphone permission for localhost |
 | `429 Rate limit reached` from Groq | Free tier allows ~8k tokens/min. Wait ~30 s between demo prompts, or upgrade to Groq Dev Tier. The app falls back to the rule-based planner automatically |
 | Shopping answer has no prices | Nimble only returns what the sources list; the model is instructed not to invent prices |
+
+### Tunnel troubleshooting
+| Symptom | Fix |
+|---|---|
+| `cloudflared: command not found` | `brew install cloudflared` |
+| `share.sh` says app is not running | Start `uvicorn` first, or set `PORT=...` to match |
+| Cloudflare `502 Bad Gateway` page | The app stopped; restart it in terminal 1 |
+| URL stopped working | The tunnel was closed or restarted; run `./scripts/share.sh` again and share the new URL |
 
 ---
 
