@@ -206,7 +206,7 @@ class NimbleToolkit:
     async def draft_or_send_email(self, to_email: str, subject: str, body: str, action: str = "draft") -> Dict[str, Any]:
         """Draft or dispatch an email on behalf of the user with internet findings, shopping links, or research summaries."""
         to_email = (to_email or "recipient@example.com").strip()
-        subject = (subject or "Update from NimbleCompanion").strip()
+        subject = (subject or "Update from NimbleBuddy").strip()
         body = (body or "").strip()
         action_mode = "sent" if action.lower() == "send" else "draft"
 

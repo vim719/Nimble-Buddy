@@ -1,1 +1,1 @@
-"""NimbleCompanion application package."""
+"""NimbleBuddy application package."""

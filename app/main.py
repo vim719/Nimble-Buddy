@@ -12,8 +12,8 @@ logging.basicConfig(
 )
 
 app = FastAPI(
-    title="NimbleCompanion API",
-    description="Backend for NimbleCompanion AI companion powered by Groq and Nimble Web APIs",
+    title="NimbleBuddy API",
+    description="Backend for NimbleBuddy AI buddy powered by Groq and Nimble Web APIs",
     version="1.0.0"
 )
 
@@ -35,7 +35,7 @@ async def health_check():
     """Health check endpoint to verify backend status."""
     return {
         "status": "healthy",
-        "service": "NimbleCompanion Backend"
+        "service": "NimbleBuddy Backend"
     }
 
 

@@ -1,5 +1,5 @@
 /**
- * NimbleCompanion - Frontend Application Script
+ * NimbleBuddy - Frontend Application Script
  * Hackathon-ready interactive agent UI with live tool inspector
  */
 
@@ -363,7 +363,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     row.innerHTML = `
       <div class="message-avatar assistant">
-        <img src="favicon.svg" alt="Nimble Companion AI">
+        <img src="favicon.svg" alt="Nimble Buddy AI">
       </div>
       <div class="message-content-wrapper">
         <div class="message-bubble">
@@ -388,7 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
     currentTypingRow.className = 'typing-indicator-row';
     currentTypingRow.innerHTML = `
       <div class="message-avatar assistant">
-        <img src="favicon.svg" alt="Nimble Companion AI">
+        <img src="favicon.svg" alt="Nimble Buddy AI">
       </div>
       <div class="typing-bubble">
         <div class="typing-dots">

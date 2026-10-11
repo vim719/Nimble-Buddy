@@ -1,11 +1,11 @@
-# NimbleCompanion 🌐
-> **Your AI Internet Companion — Listens locally, executes across the web via Nimble.**  
+# NimbleBuddy 🌐
+> **Your AI Internet Buddy — Listens locally, executes across the web via Nimble.**  
 > Built for the **AI Engineer NYC 2026** Hackathon · Competing for **Best Use of Nimble**.
 
 ---
 
 ## 🌟 Overview
-**NimbleCompanion** is an agentic AI companion that bridges the gap between local voice/chat interactions and the live internet. Powered by **Nimble's stealth web intelligence fabric** (`nimble_python`) and **Groq LLM** (`llama-3.3-70b-versatile`), it listens to your voice locally and executes autonomous "internet work" for you:
+**NimbleBuddy** is an agentic AI buddy that bridges the gap between local voice/chat interactions and the live internet. Powered by **Nimble's stealth web intelligence fabric** (`nimble_python`) and **Groq LLM** (`llama-3.3-70b-versatile`), it listens to your voice locally and executes autonomous "internet work" for you:
 
 1. **🎙️ Local Voice Listening:** Speak naturally using local speech-to-text directly in your browser.
 2. **🛍️ Autonomous Shopping:** Finds real-time deals, compares prices, and retrieves product specs via Nimble Search.
@@ -69,7 +69,7 @@ NIMBLE_API_KEY=your_nimble_api_key_here
 GROQ_API_KEY=your_groq_api_key_here
 GROQ_MODEL=llama-3.3-70b-versatile
 ```
-*(Note: If API keys are not provided, NimbleCompanion automatically activates an intelligent sandbox mode so you can demo and inspect all tool execution pipelines offline).*
+*(Note: If API keys are not provided, NimbleBuddy automatically activates an intelligent sandbox mode so you can demo and inspect all tool execution pipelines offline).*
 
 ### 3. Start the Application
 Run the unified server with a single command:

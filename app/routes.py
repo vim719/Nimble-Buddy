@@ -8,7 +8,7 @@ agent = Agent()
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., description="User message to NimbleCompanion")
+    message: str = Field(..., description="User message to NimbleBuddy")
     history: Optional[List[Dict[str, str]]] = Field(default=None, description="Optional previous chat history")
 
 
@@ -31,7 +31,7 @@ class ChatResponse(BaseModel):
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Main chat endpoint for NimbleCompanion.
+    Main chat endpoint for NimbleBuddy.
     Takes user input, runs agentic loop with tool calls, and returns final synthesized response.
     """
     if not request.message.strip():

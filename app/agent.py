@@ -22,7 +22,7 @@ class Agent:
     def _build_system_prompt(self) -> str:
         tools_str = json.dumps(self.toolkit.get_tool_descriptions(), indent=2)
         return (
-            "You are NimbleCompanion, a helpful AI assistant that can browse the internet, "
+            "You are NimbleBuddy, a helpful AI assistant that can browse the internet, "
             "shop for products, and research topics for your user.\n\n"
             f"You have access to these tools powered by Nimble:\n{tools_str}\n\n"
             "When the user asks something that requires internet access, respond with a JSON object:\n"
@@ -78,7 +78,7 @@ class Agent:
             return await self.toolkit.shop_search(product_query=product_query)
         elif tool_name == "draft_or_send_email":
             to_email = params.get("to_email") or params.get("to", "user@example.com")
-            subject = params.get("subject", "Update from NimbleCompanion")
+            subject = params.get("subject", "Update from NimbleBuddy")
             body = params.get("body", "")
             action = params.get("action", "draft")
             return await self.toolkit.draft_or_send_email(to_email=to_email, subject=subject, body=body, action=action)
@@ -99,7 +99,7 @@ class Agent:
             params = {
                 "to_email": recipient,
                 "subject": f"Summary: {message[:40]}...",
-                "body": f"Hi,\n\nHere is the information you requested via NimbleCompanion:\n\n{message}\n\nBest regards,\nNimbleCompanion",
+                "body": f"Hi,\n\nHere is the information you requested via NimbleBuddy:\n\n{message}\n\nBest regards,\nNimbleBuddy",
                 "action": "send" if "send" in lowered else "draft"
             }
             tools_used.append({"tool": tool_name, "params": params})
