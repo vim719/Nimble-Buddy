@@ -174,10 +174,3 @@ With no Nimble key, tools return clearly labelled `[Sandbox]` placeholder links 
 
 ---
 
-## 🙏 Credits & disclosure
-- Based on [MITRAKER/nimble-companion](https://github.com/MITRAKER/nimble-companion); renamed to NimbleBuddy and extended during AI Engineer NYC 2026 (Web Search Agent integration, shopping/news focus, answer synthesis, honest sandbox mode, secret-handling hardening, demo runbook).
-- **AI assistance:** Antigravity AI and Claude Code were used as coding assistants.
-- **Runtime LLM:** Groq Llama 3.3 70B Versatile.
-- **Web data:** Nimble Python SDK (`nimble_python`) — Search, Extract, Web Search Agents.
-
-MLH rules: repo must stay public; demo video ≤ 2 minutes. Judging: Technology, Design, Completion, Learning (25% each).
