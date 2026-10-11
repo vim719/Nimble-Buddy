@@ -74,66 +74,119 @@ document.addEventListener('DOMContentLoaded', () => {
 
   messageInput.addEventListener('input', adjustTextareaHeight);
 
-  // --- Local Voice Input (Speech-to-Text via Web Speech API) ---
+  // --- Voice Input: record in the browser, transcribe with Groq Whisper on the server ---
+  // (The Web Speech API only works in Chrome/Edge and fails silently elsewhere.)
   const voiceBtn = document.getElementById('voiceBtn');
-  let recognition = null;
+  const MAX_RECORDING_MS = 15000;
+  let mediaRecorder = null;
+  let recordingTimer = null;
   let isListening = false;
 
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SpeechRecognition && voiceBtn) {
-    recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
+  function setStatus(text) {
+    statusText.textContent = text;
+  }
 
-    recognition.onstart = () => {
-      isListening = true;
-      voiceBtn.classList.add('listening');
-      statusBadge.classList.add('status-listening');
-      statusText.textContent = 'Listening locally... 🎙️';
-    };
+  function resetVoiceUi() {
+    isListening = false;
+    voiceBtn.classList.remove('listening');
+    statusBadge.classList.remove('status-listening');
+    clearTimeout(recordingTimer);
+  }
 
-    recognition.onresult = (event) => {
-      let transcript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
-      }
-      if (transcript) {
-        messageInput.value = transcript;
-        adjustTextareaHeight();
-      }
-    };
-
-    recognition.onerror = (event) => {
-      console.warn('Speech recognition status:', event.error);
-      stopListening();
-    };
-
-    recognition.onend = () => {
-      stopListening();
-    };
-
-    function stopListening() {
-      isListening = false;
-      if (voiceBtn) voiceBtn.classList.remove('listening');
-      statusBadge.classList.remove('status-listening');
-      statusText.textContent = state.isGenerating ? 'Thinking...' : 'Ready';
+  async function startRecording() {
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      setStatus('Mic needs HTTPS or localhost');
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      console.warn('Microphone permission error:', err);
+      setStatus('Mic blocked — allow microphone access');
+      return;
     }
 
+    const chunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      resetVoiceUi();
+      const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+      if (blob.size < 1000) {
+        setStatus('Didn\'t catch that — try again');
+        return;
+      }
+      await transcribeAndSend(blob);
+    };
+
+    mediaRecorder.start();
+    isListening = true;
+    voiceBtn.classList.add('listening');
+    statusBadge.classList.add('status-listening');
+    setStatus('Listening… click mic to stop 🎙️');
+    recordingTimer = setTimeout(() => stopRecording(), MAX_RECORDING_MS);
+  }
+
+  function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  }
+
+  async function transcribeAndSend(blob) {
+    setStatus('Transcribing…');
+    const ext = (blob.type.split('/')[1] || 'webm').split(';')[0];
+    const form = new FormData();
+    form.append('audio', blob, `speech.${ext}`);
+    try {
+      const res = await fetch('/api/transcribe', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      if (!data.text) {
+        setStatus('Didn\'t catch that — try again');
+        return;
+      }
+      messageInput.value = data.text;
+      adjustTextareaHeight();
+      state.speakNextReply = true;
+      chatForm.dispatchEvent(new Event('submit'));
+    } catch (err) {
+      console.warn('Transcription error:', err);
+      setStatus(`Voice error: ${err.message}`);
+    }
+  }
+
+  if (voiceBtn) {
+    voiceBtn.title = 'Click to speak, click again to send (Groq Whisper)';
     voiceBtn.addEventListener('click', () => {
       if (state.isGenerating) return;
-      if (isListening) {
-        recognition.stop();
-      } else {
-        try {
-          recognition.start();
-        } catch (err) {
-          console.warn('Failed to start speech recognition:', err);
-        }
-      }
+      window.speechSynthesis && window.speechSynthesis.cancel();
+      if (isListening) stopRecording();
+      else startRecording();
     });
-  } else if (voiceBtn) {
-    voiceBtn.title = 'Speech Recognition: Use Chrome/Edge or Web Speech API compatible browser';
+  }
+
+  // --- Voice Output: read a short version of the reply aloud after a spoken question ---
+  function speakReply(markdown) {
+    if (!window.speechSynthesis) return;
+    const plain = markdown
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/https?:\/\/\S+/g, '')
+      .replace(/^\|.*\|$/gm, ' ')
+      .replace(/^-{3,}$/gm, ' ')
+      .replace(/[#*_`>|]/g, '')
+      .replace(/\[\d+\]/g, '')
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const sentences = plain.match(/[^.!?]+[.!?]+/g) || [plain];
+    const summary = sentences.slice(0, 3).join(' ').slice(0, 400);
+    if (!summary) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(summary);
+    utterance.rate = 1.05;
+    window.speechSynthesis.speak(utterance);
   }
 
   // Enter to send, Shift+Enter for newline
@@ -552,6 +605,8 @@ document.addEventListener('DOMContentLoaded', () => {
       // Update inspector sidebar
       updateInspector(toolsUsed, sources);
 
+      if (state.speakNextReply) speakReply(aiResponse);
+
     } catch (err) {
       console.error('Chat error:', err);
       hideTypingIndicator();
@@ -562,6 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sources: []
       });
     } finally {
+      state.speakNextReply = false;
       state.isGenerating = false;
       sendBtn.disabled = false;
       messageInput.focus();

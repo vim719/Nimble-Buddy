@@ -1,5 +1,6 @@
+import asyncio
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from app.agent import Agent
 
@@ -39,6 +40,31 @@ async def chat(request: ChatRequest):
 
     result = await agent.run(request.message, chat_history=request.history)
     return result
+
+
+@router.post("/transcribe")
+async def transcribe(audio: UploadFile = File(...)):
+    """
+    Speech-to-text for the mic button via Groq Whisper.
+    Works in every browser (unlike the Web Speech API, which is Chrome/Edge-only).
+    """
+    if not agent.client:
+        raise HTTPException(status_code=503, detail="Voice input needs GROQ_API_KEY in .env")
+    data = await audio.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty recording")
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Recording too long")
+    try:
+        result = await asyncio.to_thread(
+            agent.client.audio.transcriptions.create,
+            file=(audio.filename or "speech.webm", data),
+            model="whisper-large-v3-turbo",
+            language="en"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
+    return {"text": (getattr(result, "text", "") or "").strip()}
 
 
 @router.get("/status")

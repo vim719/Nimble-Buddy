@@ -16,7 +16,7 @@
 | 4 | 📄 **Read any page** | "Summarize https://docs.nimbleway.com" | **Extract** (`render=True`, Markdown) |
 | 5 | 🔬 **Fast research** | "Research the history of web scraping" | Search + parallel Extract of top sources |
 | 6 | ✉️ **Email it** | "Email that summary to judge@example.com" | Builds a `mailto:` draft; nothing is sent automatically |
-| 7 | 🎙️ **Voice input** | Click the mic | Browser Web Speech API |
+| 7 | 🎙️ **Voice in, voice out** | Click the mic, speak, click again | Browser recording → **Groq Whisper** (`whisper-large-v3-turbo`) via `POST /api/transcribe`; reply summary read aloud with browser speech synthesis. Works in Chrome, Safari, Edge, Firefox |
 
 ---
 
@@ -198,7 +198,8 @@ With no Nimble key, tools return clearly labelled `[Sandbox]` placeholder links 
 | `Nimble web_search failed: 401` | Key invalid/revoked — create a new one in the dashboard |
 | Agent says "still running after 150s" | Retry with effort `low`; the run continues server-side and can be checked in the Nimble dashboard |
 | Every reply is keyword-based | No Groq key — add `GROQ_API_KEY` (optional) |
-| Mic doesn't work | Use Chrome; allow microphone permission for localhost |
+| Mic doesn't work | Allow microphone access when the browser asks (click the 🔒 icon in the address bar to re-enable). The page must be on `localhost` or HTTPS (the Cloudflare link is HTTPS). Status bar shows the exact error. Voice needs `GROQ_API_KEY` |
+| Reply isn't spoken aloud | Spoken replies only follow voice questions; check the computer isn't muted |
 | `429 Rate limit reached` from Groq | Free tier allows ~8k tokens/min. Wait ~30 s between demo prompts, or upgrade to Groq Dev Tier. The app falls back to the rule-based planner automatically |
 | Shopping answer has no prices | Nimble only returns what the sources list; the model is instructed not to invent prices |
 

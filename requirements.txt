@@ -4,3 +4,4 @@ nimble_python
 groq
 python-dotenv
 pydantic
+python-multipart
