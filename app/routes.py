@@ -12,9 +12,23 @@ logger = logging.getLogger(__name__)
 
 # Vary delivery so consecutive spoken replies don't sound templated
 SPOKEN_TONES = [
-    "relaxed and matter-of-fact", "upbeat and curious", "warm and concise",
-    "like telling a friend something you just found out", "calm and confident", "lightly enthusiastic"
+    "relaxed and matter-of-fact", "warm and concise", "calm and confident",
+    "like telling a friend something you just found out"
 ]
+
+
+def _for_tts(text: str) -> str:
+    """Normalize typography that makes Orpheus sound choppy (odd hyphens, dashes, symbols)."""
+    num = r"(\d+(?:,\d{3})*(?:\.\d+)?)"
+    text = re.sub(r"\$" + num + r"\s*[‐-―-]\s*\$?" + num, r"\1 to \2 dollars", text)
+    text = re.sub(r"\$" + num, r"\1 dollars", text)
+    text = re.sub(r"(\d)\s*%", r"\1 percent", text)
+    text = re.sub(r"(\d)[‐-―](\d)", r"\1 to \2", text)
+    text = re.sub(r"\s*[–—]\s*", ", ", text)
+    text = re.sub(r"[‐‑]", "-", text)
+    text = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    text = text.replace("&", " and ").replace("/", " or ")
+    return " ".join(text.split())
 # Safety net: strip stock openers if the model uses one anyway
 FILLER_OPENER = re.compile(
     r"^(sure thing|sure|certainly|absolutely|of course|great question|okay|ok|so|alright|happy to help|"
@@ -101,13 +115,16 @@ def _spoken_summary(text: str) -> str:
                     "in one or two short sentences, under 180 characters total. Natural and conversational, "
                     "contractions welcome. No markdown, URLs, citations, emoji, or lists. Keep only facts from the answer. "
                     "Lead with the most interesting specific fact — a name, number, or finding. "
+                    "Write for the ear: say prices and ranges in words ('about a hundred and twenty dollars', '9 to 5'), "
+                    "expand abbreviations (ANC -> noise cancelling), no symbols like $, %, dashes or slashes, plain punctuation only. "
+                    "At most one number per sentence. "
                     "Never start with filler like 'Sure', 'Sure thing', 'Certainly', 'Absolutely', 'Of course', 'Great question', "
                     "'So', 'Okay', 'Here's', or 'I'll help you'. "
                     f"Tone for this reply: {random.choice(SPOKEN_TONES)}."
                 )},
                 {"role": "user", "content": clipped}
             ],
-            temperature=0.9,
+            temperature=0.7,
             max_tokens=400,
             reasoning_effort="low"
         )
@@ -142,12 +159,14 @@ async def speak(request: SpeakRequest):
             agent.client.audio.speech.create,
             model=settings.TTS_MODEL,
             voice=settings.TTS_VOICE,
-            input=spoken,
+            input=_for_tts(spoken),
             response_format="wav"
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"TTS failed: {e}")
-    return Response(content=audio.read(), media_type="audio/wav", headers={"X-Spoken-Text": spoken.encode("ascii", "ignore").decode()})
+    # Header values must be a single printable line, or the response fails and the browser voice takes over
+    header_text = " ".join(spoken.encode("ascii", "ignore").decode().split())[:300]
+    return Response(content=audio.read(), media_type="audio/wav", headers={"X-Spoken-Text": header_text})
 
 
 @router.get("/status")
