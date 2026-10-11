@@ -2,6 +2,7 @@ import asyncio
 import base64
 import logging
 import re
+import httpx
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -153,38 +154,70 @@ def _spoken_summary(text: str) -> str:
     return " ".join(plain.split())[:200]
 
 
-@router.post("/speak")
-async def speak(request: SpeakRequest):
-    """
-    Human-sounding voice reply: rewrite the answer in spoken style, then synthesize
-    it with Orpheus TTS on Groq. The frontend falls back to the browser voice on error.
-    """
-    if not agent.client:
-        raise HTTPException(status_code=503, detail="Voice replies need GROQ_API_KEY in .env")
-    spoken = await asyncio.to_thread(_spoken_summary, request.text)
-    # Orpheus on Groq's free tier allows ~1,200 tokens/min, so back-to-back replies can hit 429.
-    # Wait out the short per-minute window (up to ~12s total) rather than dropping to the robotic browser voice.
-    audio = None
+def _elevenlabs_tts(text: str) -> bytes:
+    """Synthesize speech with ElevenLabs (MP3)."""
+    response = httpx.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{settings.ELEVENLABS_VOICE_ID}",
+        params={"output_format": "mp3_44100_128"},
+        headers={"xi-api-key": settings.ELEVENLABS_API_KEY, "Content-Type": "application/json"},
+        json={
+            "text": text,
+            "model_id": settings.ELEVENLABS_MODEL,
+            "voice_settings": {"stability": 0.45, "similarity_boost": 0.8, "style": 0.15, "use_speaker_boost": True}
+        },
+        timeout=30
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"ElevenLabs {response.status_code}: {response.text[:200]}")
+    return response.content
+
+
+async def _orpheus_tts(text: str) -> bytes:
+    """Synthesize speech with Orpheus on Groq (WAV), waiting out short per-minute rate limits."""
     for attempt in range(4):
         try:
             audio = await asyncio.to_thread(
                 agent.client.with_options(max_retries=0).audio.speech.create,
                 model=settings.TTS_MODEL,
                 voice=settings.TTS_VOICE,
-                input=_for_tts(spoken),
+                input=text,
                 response_format="wav"
             )
-            break
+            return audio.read()
         except RateLimitError as e:
             retry_after = _retry_after_seconds(e)
             if attempt == 3 or retry_after > 10:
-                raise HTTPException(status_code=429, detail=f"Voice rate limit reached; retry in {retry_after:.0f}s")
-            logger.info(f"TTS rate limited, retrying in {retry_after:.1f}s")
+                raise RuntimeError(f"Orpheus rate limit reached; retry in {retry_after:.0f}s")
+            logger.info(f"Orpheus rate limited, retrying in {retry_after:.1f}s")
             await asyncio.sleep(retry_after)
+
+
+@router.post("/speak")
+async def speak(request: SpeakRequest):
+    """
+    Human-sounding voice reply: rewrite the answer in spoken style, then synthesize it with
+    ElevenLabs (if configured), else Orpheus on Groq. The frontend falls back to the browser voice on error.
+    """
+    if not agent.client:
+        raise HTTPException(status_code=503, detail="Voice replies need GROQ_API_KEY in .env")
+    spoken = await asyncio.to_thread(_spoken_summary, request.text)
+    tts_text = _for_tts(spoken)
+
+    errors = []
+    if settings.ELEVENLABS_API_KEY:
+        try:
+            audio = await asyncio.to_thread(_elevenlabs_tts, tts_text)
+            # Return the exact words spoken so the chat can show them alongside the audio
+            return {"text": spoken, "audio": base64.b64encode(audio).decode(), "mime": "audio/mpeg", "engine": "elevenlabs"}
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"TTS failed: {e}")
-    # Return the exact words spoken so the chat can show them alongside the audio
-    return {"text": spoken, "audio": base64.b64encode(audio.read()).decode(), "mime": "audio/wav"}
+            logger.warning(f"ElevenLabs failed, trying Orpheus: {e}")
+            errors.append(str(e))
+    try:
+        audio = await _orpheus_tts(tts_text)
+        return {"text": spoken, "audio": base64.b64encode(audio).decode(), "mime": "audio/wav", "engine": "orpheus"}
+    except Exception as e:
+        errors.append(str(e))
+    raise HTTPException(status_code=502, detail="Voice unavailable: " + " | ".join(errors))
 
 
 @router.get("/status")
@@ -194,7 +227,8 @@ async def get_status():
     """
     return {
         "nimble": "live" if agent.toolkit.is_live else "sandbox",
-        "llm": "groq" if agent.client else "rule-based planner"
+        "llm": "groq" if agent.client else "rule-based planner",
+        "voice": "elevenlabs" if settings.ELEVENLABS_API_KEY else ("orpheus" if agent.client else "browser")
     }
 
 
